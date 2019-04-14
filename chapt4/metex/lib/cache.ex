@@ -26,6 +26,10 @@ defmodule Metex.Cache do
     GenServer.cast(@server_name, :clear)
   end
 
+  def stop() do
+    GenServer.cast(@server_name, :stop)
+  end
+
   def exists?(key) do
     GenServer.call(@server_name, {:exists, key})
   end
@@ -35,7 +39,7 @@ defmodule Metex.Cache do
     {:ok, table}
   end
 
-  def handle_call({:read, key}, table) do
+  def handle_call({:read, key}, _from, table) do
     case :ets.lookup(table, key) do
       [{^key, data}] -> {:reply, data, table}
       [] ->
@@ -44,8 +48,9 @@ defmodule Metex.Cache do
     end
   end
 
-  def handle_call({:exists, key}, table) do
-    {:reply, :ets.member(table, key), table}
+  def handle_call({:exists, key}, _from, table) do
+    reply = :ets.member(table, key)
+    {:reply, reply, table}
   end
 
   def handle_cast({:write, {key, data}}, table) do
@@ -59,8 +64,12 @@ defmodule Metex.Cache do
   end
 
   def handle_cast(:clear, table) do
-    handle_ets_cast(:delete_all).(:ets.delete(table))
+    handle_ets_cast(:delete_all).(:ets.delete_all_objects(table))
     {:noreply, table}
+  end
+
+  def handle_cast(:stop, _table) do
+    {:stop, :normal, nil}
   end
 
   def handle_info(msg, table) do
@@ -69,19 +78,18 @@ defmodule Metex.Cache do
   end
 
   def terminate(reason, table) do
-    Logger.warn("Server terminated b/c of #{reason}")
+    handle_ets_cast(:delete_all).(:ets.delete(table))
+    Logger.warn("Server terminated b/c of #{inspect(reason)}")
     :ok
   end
 
   defp handle_ets_cast(action) do
     fn(response) ->
-      case response do
-        true ->
-          Logger.info("#{action} for key #{key} on table #{@table_name} success")
-        _ ->
-          Logger.info("#{action} for key #{key} on table #{@table_name} failure")
-      end
+      Logger.info("#{inspect(action)} on table #{inspect(@table_name)} #{inspect(msg(response))}")
     end
   end
+
+  defp msg(true), do: :success
+  defp msg(_), do: :failure
 
 end
