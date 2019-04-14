@@ -15,6 +15,14 @@ defmodule Metex.Worker do
     GenServer.call(pid, :get_state)
   end
 
+  def reset_stats(pid) do
+    GenServer.cast(pid, :reset_state)
+  end
+
+  def stop(pid) do
+    GenServer.cast(pid, :stop)
+  end
+
   def init(:ok) do
     {:ok, %{}}
   end
@@ -32,6 +40,24 @@ defmodule Metex.Worker do
 
   def handle_call(:get_state, _from, state) do
     {:reply, state, state}
+  end
+
+  def handle_cast(:reset_state, _state) do
+    {:noreply, %{}}
+  end
+
+  def handle_cast(:stop, state) do
+    {:stop, :normal, state}
+  end
+
+  def handle_info(msg, state) do
+    Logger.info("Received: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
+  def terminate(reason, state) do
+    Logger.warn("Server terminated b/c of #{reason} with state: #{inspect(state)}")
+    :ok
   end
 
   defp update_location_count(state, location) do
