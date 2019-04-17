@@ -2,7 +2,7 @@ defmodule Pooly.Server do
   use GenServer
 
   defmodule State do
-    defstruct sup: nil, size: nil, mfa: nil
+    defstruct sup: nil, size: nil, mfa: nil, worker_sup: nil, workers: nil
   end
 
   def start_link(sup, pool_config) do
