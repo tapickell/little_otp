@@ -22,18 +22,20 @@ defmodule Pooly.Server do
   end
 
   def init([{:sup, sup}, {:size, size}]) when is_pid(sup) and is_integer(size) do
+    Process.flag(:trap_exit, true)
     monitors = :ets.new(:monitors, [:private])
     send(self(), :start_worker_supervisor)
     {:ok, %State{sup: sup, size: size, monitors: monitors}}
   end
 
   def handle_call({:checkin, w_pid}, %{workers: workers, monitors: monitors} = state) do
-    case :ets.lookup(monitors, w_pi) do
+    case :ets.lookup(monitors, w_pid) do
       [{pid, ref}] ->
         with true <- Process.demonitor(ref),
              true <- :ets.delete(monitors, pid) do
           {:noreply, %{state | workers: [pid | workers]}}
         end
+
       [] ->
         {:noreply, state}
     end
@@ -45,6 +47,7 @@ defmodule Pooly.Server do
         ref = Process.monitor(from_pid)
         true = :ets.insert(monitors, {worker, ref})
         {:reply, worker, %{state | workers: rest}}
+
       [] ->
         {:reply, :noproc, state}
     end
@@ -55,16 +58,56 @@ defmodule Pooly.Server do
   end
 
   def handle_info(:start_worker_supervisor, %{sup: sup, size: size} = state) do
-    {:ok, w_sup} =
-      Supervisor.start_child(sup, Pooly.WorkerSupervisor.child_spec(restart: :temporary))
+    case Supervisor.start_child(sup, Pooly.WorkerSupervisor.child_spec(restart: :temporary)) do
+      {:ok, w_sup} ->
+        start_workers(size)
+        workers = get_workers(w_sup)
 
-    workers =
-      1..size
-      |> Enum.map(fn _ ->
-        {:ok, pid} = Pooly.WorkerSupervisor.start_child([])
-        pid
-      end)
+        {:noreply, %{state | worker_sup: w_sup, workers: workers}}
 
-    {:noreply, %{state | worker_sup: w_sup, workers: workers}}
+      {:error, {:already_started, w_sup}} ->
+        started_worker_count = get_workers(w_sup) |> Enum.count()
+        start_workers(size - started_worker_count)
+        workers = get_workers(w_sup)
+
+        {:noreply, %{state | worker_sup: w_sup, workers: workers}}
+    end
+  end
+
+  def handle_info({:DOWN, ref, _, _, _}, %{monitors: monitors, workers: workers} = state) do
+    case :ets.match(monitors, {:"$1", ref}) do
+      [[pid]] ->
+        true = :ets.delete(monitors, pid)
+        {:noreply, %{state | workers: [pid | workers]}}
+
+      [[]] ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:EXIT, pid, _reason}, %{monitors: monitors, workers: workers} = state) do
+    case :ets.lookup(monitors, pid) do
+      [{pid, ref}] ->
+        true = Process.demonitor(ref)
+        true = :ets.delete(monitors, pid)
+        {:noreply, %{state | workers: [start_workers(1) | workers]}}
+      [[]] ->
+        {:noreply, state}
+    end
+  end
+
+  defp start_workers(size) when size > 0 do
+    1..size
+    |> Enum.each(fn _ ->
+      {:ok, pid} = Pooly.WorkerSupervisor.start_child([])
+      pid
+    end)
+  end
+
+  defp start_workers(_), do: :ok
+
+  defp get_workers(w_sup) do
+    Supervisor.which_children(w_sup)
+    |> Enum.map(fn {_, pid, _, _} -> pid end)
   end
 end
