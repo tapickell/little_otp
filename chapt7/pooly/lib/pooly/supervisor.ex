@@ -7,9 +7,10 @@ defmodule Pooly.Supervisor do
 
   @impl true
   def init(pools_config) do
-    children = Enum.map(pools_config, fn([name: n, size: s]) ->
-      Pooly.Server.child_spec(sup: self(), id: n, name: n, size: s)
-    end)
+    children = [
+      Pooly.PoolsSupervisor,child_spec([]),
+      Pooly.Server.child_spec(sup: self(), config: pools_config)
+    ]
 
     Supervisor.init(children, strategy: :one_for_all)
   end

@@ -5,20 +5,24 @@ defmodule Pooly.Server do
     defstruct sup: nil, size: nil, worker_sup: nil, workers: nil, monitors: nil
   end
 
-  def start_link(options) do
-    GenServer.start_link(__MODULE__, options, name: __MODULE__)
+  def start_link(pools_config) do
+    GenServer.start_link(__MODULE__, pools_config, name: __MODULE__)
   end
 
-  def checkin(w_pid) do
-    GenServer.call(__MODULE__, {:checkin, w_pid})
+  def checkin(pool_name, w_pid) do
+    GenServer.call(:"#{pool_name}Server", {:checkin, w_pid})
   end
 
-  def checkout() do
-    GenServer.call(__MODULE__, :checkout)
+  def checkout(pool_name) do
+    GenServer.call(:"#{pool_name}Server", :checkout)
   end
 
-  def status() do
-    GenServer.call(__MODULE__, :status)
+  def status(pool_name) do
+    GenServer.call(:"#{pool_name}Server", :status)
+  end
+
+  def init(pools_config) do
+    Enum.each(pools_config, fn(c) -> send(self(), {:start_pool, c}) end)
   end
 
   def init([{:sup, sup}, {:size, size}]) when is_pid(sup) and is_integer(size) do
@@ -55,6 +59,16 @@ defmodule Pooly.Server do
 
   def handle_call(:status, _from, %{workers: workers, monitors: monitors} = state) do
     {:reply, {length(workers), :ets.info(monitors, :size)}, state}
+  end
+
+  def handle_info({:start_pool, pool_config}, state) do
+    opts = generate_id(pool_config)
+
+    {:ok, _pool_sup} = pool_config
+    |> Pooly.PoolsSupervisor.child_spec(opts)
+    |> Supervisor.start_child()
+
+    {:noreply, state}
   end
 
   def handle_info(:start_worker_supervisor, %{sup: sup, size: size} = state) do
@@ -109,5 +123,9 @@ defmodule Pooly.Server do
   defp get_workers(w_sup) do
     Supervisor.which_children(w_sup)
     |> Enum.map(fn {_, pid, _, _} -> pid end)
+  end
+
+  defp generate_id([name: name, size: _size]) do
+    [:id, :"#{name}Supervisor"]
   end
 end
