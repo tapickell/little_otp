@@ -12,6 +12,7 @@ defmodule Pooly do
   end
 
   def start_pools(pools_config) do
+    IO.inspect(pools_config, label: "start pools called in #{__MODULE__}")
     Pooly.Supervisor.start_link(pools_config)
   end
 
